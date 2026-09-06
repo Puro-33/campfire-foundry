@@ -1,107 +1,97 @@
-# Awesome Physical AI를 Campfire Foundry에 통합하는 방법
+# Physical AI 출처 기반 온톨로지 구축 및 데이터 충분성 판단
 
-- 대상: Campfire Foundry 제품·연구 설계자
-- 조사일: 2026-09-05
-- 범위: keon/awesome-physical-ai의 분류 체계, Campfire에 필요한 공개 인터페이스, OpenCat 연동 경계, 안전·운영 설계
-- 제외: 사용자가 이미 완료했다고 밝힌 장치 연결성의 재시험, 개별 모델 성능 재현, 제품 인증 판단
+- 대상 독자: Campfire Foundry 제품·연구 설계자
+- 조사일: 2026-09-05 (America/Los_Angeles)
+- 범위: `keon/awesome-physical-ai` 고정 커밋의 구조화, 출처 추적, 그래프 검증, 온톨로지와 로봇 정책 학습의 데이터 규모 구분
+- 가정: 사용자가 말한 “잘 작동”은 (1) 검색·관계 추적·규칙 검증과 (2) 로봇 행동 예측/학습을 모두 포함할 수 있으므로 두 문제를 분리한다.
+- 제외: 목록에 있다는 사실만으로 프로젝트 간 호환성·성능 우열·장치 연결 성공을 추론하지 않는다.
 
 ## 직접 답
 
-[Awesome Physical AI](https://github.com/keon/awesome-physical-ai)는 통합 가능한 단일 소프트웨어가 아니라 Physical AI 연구를 발견하기 위한 CC0 색인이다. Campfire는 모든 프로젝트를 서로 직접 연결하지 말고 관찰, 세계 예측, 추론·계획, 행동 정책, 시뮬레이션, 오케스트레이션, 장치 실행 역할의 플러그인으로 등록해야 한다. 플러그인들은 공통 Observation, ActionProposal, ApprovedAction, EpisodeOutcome 객체만 교환한다.
+온톨로지/지식그래프에는 보편적인 최소 노드 수가 없다. 수백 개의 고품질 객체로도 좁은 업무 질문에는 충분할 수 있고, 수백만 개의 트리플도 업무 범위가 빠졌거나 출처가 없으면 충분하지 않다. 충분성은 원시 개수가 아니라 우선순위 질문 답변율, 선언 범위 대비 coverage, 출처 완비율, 제약 위반, 최신성으로 판정해야 한다. [W3C SHACL](https://www.w3.org/TR/shacl/)은 그래프를 선언된 조건에 대해 검증하고 보고서를 만드는 표준이며 최소 트리플 수를 요구하지 않는다. [W3C Data on the Web Best Practices](https://www.w3.org/TR/dwbp/)도 완전성을 선언된 데이터셋 범위에서 기대 객체 대비 표현된 객체의 비율로 설명한다.
 
-권장 기본 경로:
+로봇 정책 학습은 별도 문제다. [SmolVLA](https://huggingface.co/blog/smolvla)는 정제된 487개 데이터셋, 약 1천만 프레임, 3만 미만 에피소드를 사용했고 크기만이 아니라 시각 품질·과업 coverage·다양성을 기준으로 선별했다. 범용 사전학습 사례인 [OpenVLA](https://proceedings.mlr.press/v270/kim25c.html)는 97만 개 실제 로봇 시연, [Open X-Embodiment](https://robotics-transformer-x.github.io/)는 100만 개 이상의 실제 로봇 궤적과 22개 embodiment를 보고한다. 이 숫자는 사례이지 신규 단일 과업의 보편적 최소값이 아니다.
 
-동의된 현장 관찰 → Ontology 객체 → AI 가설 → 사람 검토 → LeRobot PolicyAdapter → SafetyGate → MuJoCo 또는 Isaac Lab → 사람 실행 승인 → ROS 2 Action → OpenCatAdapter → 장치 → Outcome
+## 구축 결과
 
-VLA나 자연어 모델이 원시 시리얼 문자열이나 관절각을 직접 만들거나 보내지 않게 하는 것이 가장 중요한 경계다.
+2026-06-24의 고정 커밋 `a6f62d11d9e7d1336a04927e86e3fbedc25a8456`과 사용자가 지정한 OpenCat 공식 저장소를 수집했다. 생성 데이터셋은 다음을 포함한다.
 
-## 저장소 감사
+- 노드 1,358개
+- 관계 1,419개
+- 원 목록 및 사용자 지정 출처 언급(`CatalogMention`) 472개
+- 분류 34개, 물리 AI 실행 역할 7개
+- 논문 식별 노드 355개, GitHub 저장소 100개, 웹 리소스 303개
+- GitHub 공식 API로 다시 확인된 외부 저장소 98개
+- 모든 노드의 source URL, 수집 시각, SHA-256 완비
+- 중복 노드 ID 0, 끊어진 관계 0
 
-[Awesome Physical AI README](https://raw.githubusercontent.com/keon/awesome-physical-ai/main/README.md)는 기반 VLM, 시각 표현, VLA 구조, 행동 표현, 월드모델, 추론·계획, 학습, 일반화, 배포, 안전, 평생학습, 응용, sim-to-real, 데이터셋, 시뮬레이터를 폭넓게 분류한다. 그러나 전용 로봇 런타임, 장치 계약, ROS 2, OpenCat, 승인 원장 같은 통합 계층은 제공하지 않는다.
+README의 행은 사실 객체로 바로 승격하지 않고 `CatalogMention`으로 저장했다. `Paper`, `Code`, `Project` 링크는 목록이 명시한 관계로 저장하고, GitHub API가 확인한 저장소 소유자만 `MAINTAINED_BY`로 승격했다. Campfire Foundry의 7개 실행 역할 연결은 원문 사실이 아니라 `DESIGN_MAPPING`, 신뢰도 0.65로 표시했다. 이는 [W3C PROV-O](https://www.w3.org/TR/prov-o/)의 Entity·Activity·Agent 및 derivation chain 개념을 단순화해 적용한 것이다.
 
-2026-09-05에 현재 README를 직접 집계했을 때 arXiv URL 384개와 Code 링크 74개가 있었고, XXXXX가 남은 placeholder arXiv URL도 27개였다. 따라서 이 저장소는 발견 색인이지만 링크, 연도, 성능 문구를 채택 근거로 그대로 사용하면 안 된다. 각 공식 논문·저장소·문서를 다시 확인하는 소스 승격 과정이 필요하다.
+## 데이터 모델
 
-사용자가 모든 프로젝트의 장치 연결을 검증했다는 진술은 connectivity=user_verified로 기록한다. 이것은 공개 문서가 입증하는 interface=officially_documented나 Campfire가 별도로 측정해야 할 task_quality, latency, safety와 분리한다.
+핵심 클래스:
 
-## 7계층 통합 설계
+- `Catalog`: 버전 고정 수집 스냅샷
+- `CatalogMention`: 원 목록에서 수집한 행/항목
+- `Category`: README의 분류 경로
+- `OperationalRole`: 감지·세계예측·추론·정책·시뮬레이션·제어·장치실행
+- `Paper`, `Repository`, `Organization`, `WebResource`
 
-### 1. 관찰
+핵심 관계:
 
-카메라·IMU·GPS·메모를 Observation 객체로 정규화한다. 원본, 파생 특징, 품질, 동의 범위, 시간, 흐림 수준을 함께 기록한다. DINOv2·SAM 계열은 인식 플러그인이며 사실 원장 자체가 아니다. 휴대폰 움직임으로 건강·피로·감정을 추론하지 않는다.
+- `Catalog HAS_CATEGORY Category`
+- `Category CONTAINS CatalogMention`
+- `CatalogMention HAS_PAPER/HAS_CODE/HAS_PROJECT_PAGE Resource`
+- `Repository MAINTAINED_BY Organization`
+- `Category SUPPORTS_ROLE OperationalRole` — 반드시 `DESIGN_MAPPING` 표시
 
-### 2. 세계 예측
+모든 관계는 `confidence`, `verificationStatus`, `evidenceUrl`, `evidenceKind`, `evidenceHash`를 갖는다. 단순히 같은 목록에 등장했다는 이유로 `WORKS_WITH`, `TRAINED_ON`, `OUTPERFORMS` 같은 관계를 만들지 않는다.
 
-[V-JEPA 2 공식 저장소](https://github.com/facebookresearch/vjepa2)는 비디오 잠재 표현과 action-conditioned 예측을 제공한다. Campfire에서는 후보 행동 뒤의 상태를 추정하거나 이상을 탐지하는 WorldModelAdapter로 사용한다. 공개 로봇 증거는 주로 Franka 조작에 관한 것이므로 OpenCat에서의 예측 품질은 연결 성공과 별도로 측정한다. 2026년 공개된 V-JEPA 2.1은 현재 색인보다 새로우므로 목록의 최신성도 별도 관리한다.
+## 충분성 판정 기준
 
-### 3. 추론·계획
+### 온톨로지 파일럿 — 공학적 휴리스틱
 
-자연어 모델은 목표와 맥락을 ActionProposal로 바꾼다. 제안에는 출처, 불확실성, 예상 결과, 필요한 능력, 금지 조건이 들어간다. Palantir형 온톨로지는 증거·가설·결정·장치·결과의 관계와 허용된 행동을 관리한다. 계획 모델은 실행 권한을 갖지 않는다.
+아래는 표준이나 논문이 보장하는 최소량이 아니라 첫 배치를 설계하는 기준이다.
 
-### 4. 행동 정책
+- 핵심 competency question 10~20개
+- 핵심 클래스마다 대표 인스턴스 5~10개
+- 중요 관계·제약마다 정상 사례 3개, 누락/오류 사례 1개 이상
+- P0 질문 답변율 100%
+- 핵심 사실 provenance 완비율 100%
+- 배포 데이터의 blocking 제약 위반 0개
 
-[LeRobot 공식 문서](https://huggingface.co/docs/lerobot/main/index)는 데이터 수집, 정책 훈련·평가, 장치 추상화를 한 작업면에 둔다. 모든 장치가 connect, get_observation, send_action, disconnect 계약을 구현하므로 Campfire의 기본 RobotAdapter 경계로 적합하다. 외부 장치는 별도 Python 플러그인으로 추가할 수 있다.
+현재 1,358노드 그래프는 연구 자원 발견·출처 추적이라는 좁은 목적의 파일럿 규모는 넘는다. 그러나 모델이 어떤 데이터로 학습됐는지, 어떤 로봇·과업에서 어떤 성능을 냈는지 답하려면 원 논문에서 `Model`, `Dataset`, `Robot`, `Task`, `Evaluation` 주장을 추가 추출해야 한다.
 
-[SmolVLA](https://huggingface.co/blog/smolvla)는 450M 규모, 다중 이미지·센서운동 상태·자연어 입력, action chunk, 비동기 추론을 제공하므로 소비자급 장비에서 시작하는 기본 정책 후보이다. [OpenVLA](https://github.com/openvla/openvla)는 7B 비교 정책 또는 원격 정책 서비스로 둔다. 둘의 출력은 공통 ActionProposal로 정규화하고 action_space, 단위, 좌표계, horizon, control_hz, model_version을 반드시 붙인다.
+### 좁은 로봇 과업 — 공학적 휴리스틱
 
-### 5. 시뮬레이션
+고정 장치·고정 과업은 50 에피소드를 첫 수집 tranche로 삼아 학습 곡선을 그린다. 50은 최소치가 아니다. 매 배치 후 별도 물체·조명·위치·사람이 있는 보류 환경에서 성공률, 실패 모드, 안전 중단률을 비교하고 개선이 포화될 때 중단한다.
 
-[MuJoCo](https://mujoco.readthedocs.io/en/stable/overview.html)는 articulated/contact dynamics, MJCF·URDF 로딩, 제어·상태추정·시스템식별을 위한 비교적 얇은 물리 엔진이다. 빠른 MVP와 결정론적 회귀 테스트에 알맞다.
+### 범용 정책
 
-[Isaac Lab](https://isaac-sim.github.io/IsaacLab/main/)은 Isaac Sim 위의 로봇학습 프레임워크로 벡터화 환경, 센서, domain randomization, imitation/RL 작업면을 제공한다. 고충실도·대규모 학습에는 강하지만 현재 2.x, main, 3.0 beta 문서와 플랫폼 조건을 고정해야 한다.
+범용 VLA의 공개 사례는 수만 에피소드에서 약 100만 시연/궤적까지 넓다. 사전학습 모델, embodiment 수, 과업 다양성, 관측·행동 공간이 다르므로 하나의 최소량으로 환산할 수 없다. 양보다 coverage와 정규화가 중요한 근거는 SmolVLA가 데이터셋을 프레임 수뿐 아니라 시각 품질·과업 coverage로 필터링하고 과업 문구와 카메라 명칭을 표준화한 과정이다.
 
-MVP에서 두 스택을 상시 운용하지 않는다. 가벼운 사족 회귀가 우선이면 MuJoCo, RTX 센서 합성과 대규모 병렬 학습이 핵심이면 Isaac Lab을 선택한다. 동일한 reset, step, outcome SimAdapter 계약을 두면 나중에 교체 가능하다.
+## 한계와 불일치
 
-### 6. 오케스트레이션·제어
+- arXiv 대량 API 요청이 429 제한을 반환했다. 유효 형식의 arXiv ID는 보존했지만 이번 스냅샷에서는 1차 API 재확인으로 표시하지 않았다.
+- 원 목록에는 유일값 기준 9개의 `XXXXX` arXiv placeholder ID가 있고, 수집된 관계 24곳에서 재사용된다. `INVALID_OR_PLACEHOLDER_ARXIV_ID`로 표시했다.
+- Awesome 목록의 CC0 라이선스는 연결된 논문·코드·데이터의 라이선스로 전파되지 않는다.
+- 목록의 한 행은 Dataset, Benchmark, Project 등의 역할을 섞을 수 있다. 따라서 링크 라벨은 `catalogClaimedKind`이고 검증된 실체 유형과 분리했다.
+- 장치 연결 성공 주장은 이번 크롤링으로 검증하지 않았다. 실제 영수증에는 장치·펌웨어·환경·코드 버전·시각·결과를 별도 실행 Activity로 남겨야 한다.
 
-[ROS 2 인터페이스 문서](https://docs.ros.org/en/ros2_documentation/rolling/Concepts/Basic/Interfaces-Topics-Services-Actions.html)에 따라 연속 센서 스트림은 Topic, 짧은 질의는 Service, 피드백·취소가 필요한 장시간 동작은 Action으로 분리한다. [Managed Nodes 설계](https://design.ros2.org/articles/node_lifecycle.html)의 Unconfigured → Inactive → Active → Finalized 수명주기를 장치 어댑터에 적용한다.
+## 조사 기록과 중단 이유
 
-ros2_control을 쓰는 경우 read-update-write loop, joint limits, fallback을 활용하되 이것을 인증된 물리 비상정지로 오해하지 않는다. 실제 전원 차단, MCU watchdog, 물리 E-stop은 AI와 ROS보다 아래 계층에 둔다.
-
-### 7. 장치 실행
-
-사용자가 준 [OpenCat 저장소](https://github.com/PetoiCamp/OpenCat-Quadruped-Robot)는 NyBoard/ATmega328P 기반 구형 Bittle·Nybble를 다루며, 현재 세대 Bittle X·Nybble Q는 [OpenCatESP32](https://github.com/PetoiCamp/OpenCatEsp32-Quadruped-Robot) 프로필로 분기한다.
-
-[Petoi Serial Protocol](https://docs.petoi.com/apis/serial-protocol)은 명령이 대소문자를 구분하는 ASCII token임을 설명한다. 상위 모델에 이 원시 형식을 노출하지 않는다. MVP 허용 의도는 SIT, STAND, REST, BEEP로 제한하며 Gateway만 ksit, kbalance, d, 검토된 고정 음 패턴으로 변환한다. 임의 관절각, 보행, 회전, 점프, 보정, 펌웨어 업로드, 자동 재전송은 차단한다.
-
-## 안전 결론
-
-[Google DeepMind의 로봇 안전 설명](https://deepmind.google/models/gemini-robotics/responsibly-advancing-ai-and-robotics/)처럼 의미·물리·운영 안전은 겹치는 여러 층이어야 한다. [RoboPAIR](https://robopair.org/)는 LLM 제어 로봇에서 텍스트 jailbreak가 물리 행동으로 이어질 수 있음을 실험했다. 따라서 자연어 안전 필터는 장치 allowlist, 속도·관절 제한, 장애물·접촉 제어, 현장 사람 승인, 취소, watchdog, 전원 차단을 대체할 수 없다.
-
-Campfire의 안전 spine:
-
-동의 → 출처 → 불확실성 → 정책 제안 → 시뮬레이션 → 의미 가드 → 물리 제약 → 사람 승인 → allowlist 변환 → 취소 가능 실행 → 결과 감사
-
-## 경영 시뮬레이션과의 결합
-
-경영 라운드에서 마케팅은 수요, R&D는 개인화·정책 품질, 생산은 장치 용량·폐기, 재무는 현금 완충과 안전투자를 결정한다. 제출된 DecisionSet만 ProductSpec과 ControlPolicy를 만들 수 있고, 사람 승인 뒤 ProductionRun 또는 RobotAction이 생성된다. Outcome은 다음 라운드의 예측 오차와 기업 성과에 함께 반영한다.
-
-이 구조는 Business Simulation의 부서별 결정 → 공식 제출 → 라운드 처리 → 경쟁 결과 → 디브리프와 Physical AI의 관찰 → 예측 → 계획 → 제어 → 행동 → 피드백을 한 학습 루프로 결합한다.
-
-## 권장 단계
-
-1. 현재: Ontology 원장, 합성 Observation, 결정론적 경영 엔진, Human Gate, MockOpenCatAdapter.
-2. 다음: LeRobot 외부 Robot plugin, ROS 2 Action/Lifecycle, 단일 MuJoCo 회귀 환경, 사용자 장치 검증 로그의 Episode 변환.
-3. 실험: SmolVLA 기본 정책, V-JEPA 2 예측 플러그인, OpenVLA/openpi 원격 비교 정책, 필요 시 Isaac Lab 고충실도 트랙.
-
-## 한계
-
-- 사용자의 장치 검증 원시 로그와 테스트 조건은 이번 대화에 포함되지 않아 연결성은 사용자 제공 근거로만 표기했다.
-- 개별 프로젝트의 과제 성공률, 지연시간, 안전성은 장치 연결 성공에서 추론할 수 없다.
-- awesome-physical-ai의 일부 항목은 placeholder 링크와 시점 불일치를 포함하므로 목록 자체를 자동 설치 manifest로 쓰면 안 된다.
-- 실제 제품 분류와 ISO 적합성·인증은 의도된 사용, 사용자, 장소, 관할이 정해진 뒤 별도 판단해야 한다.
+고정 README·LICENSE, GitHub API, W3C PROV-O·SHACL·DWBP, Open X-Embodiment, OpenVLA, SmolVLA를 확인했다. 목록 구조, provenance/검증 기준, 공개 로봇 데이터 규모라는 핵심 주장에 1차 근거가 확보됐고 추가 검색이 보편적 최소량을 제시할 가능성이 낮아 수익 체감 기준으로 중단했다.
 
 ## 주장-출처 원장
 
-| 주장 | 출처 | 게시·갱신 정보 | 확인 메모 |
+| 주장 | 출처 | 게시자/저자·날짜 | 접근 메모 |
 |---|---|---|---|
-| 색인의 범위와 CC0 성격 | [Awesome Physical AI](https://github.com/keon/awesome-physical-ai) | Keon, 2026-06-24 최근 push 확인 | README와 LICENSE 직접 확인 |
-| LeRobot 장치 계약·데이터 작업면 | [LeRobot](https://huggingface.co/docs/lerobot/main/index), [Bring Your Own Hardware](https://huggingface.co/docs/lerobot/main/en/integrate_hardware) | Hugging Face, 2026-09-05 열람 | 공식 문서 |
-| SmolVLA 규모·입출력·비동기 추론 | [SmolVLA](https://huggingface.co/blog/smolvla) | Hugging Face, 2025-06-03 | 공식 기술 블로그 |
-| OpenVLA 7B·원격 추론 역할 | [OpenVLA](https://github.com/openvla/openvla) | Moo Jin Kim 외, 2024 | 공식 저장소 |
-| V-JEPA 2/2.1 역할 | [V-JEPA 2](https://github.com/facebookresearch/vjepa2) | Meta FAIR, 2025-06 / 2026-03 | 공식 저장소 |
-| MuJoCo 역할 | [MuJoCo Overview](https://mujoco.readthedocs.io/en/stable/overview.html) | Google DeepMind, 2026-09-05 열람 | 공식 문서 |
-| Isaac Lab 역할·버전 주의 | [Isaac Lab](https://isaac-sim.github.io/IsaacLab/main/) | Isaac Lab Project, 2026-09-02 갱신 문서 확인 | 공식 문서 |
-| ROS 2 통신 역할·수명주기 | [ROS 2 Interfaces](https://docs.ros.org/en/ros2_documentation/rolling/Concepts/Basic/Interfaces-Topics-Services-Actions.html), [Managed Nodes](https://design.ros2.org/articles/node_lifecycle.html) | ROS 2 Project | 공식 문서 |
-| OpenCat 세대·시리얼 경계 | [OpenCat](https://github.com/PetoiCamp/OpenCat-Quadruped-Robot), [OpenCatESP32](https://github.com/PetoiCamp/OpenCatEsp32-Quadruped-Robot), [Serial Protocol](https://docs.petoi.com/apis/serial-protocol) | Petoi, 2026-09-05 열람 | 공식 저장소·문서 |
-| 다층 로봇 안전 | [Responsibly advancing AI and robotics](https://deepmind.google/models/gemini-robotics/responsibly-advancing-ai-and-robotics/), [RoboPAIR](https://robopair.org/) | Google DeepMind; Robey 외, ICRA 2025 | 공식 설명·연구 프로젝트 |
-| cross-embodiment 데이터 규모 | [Open X-Embodiment](https://robotics-transformer-x.github.io/) | Open X-Embodiment Collaboration, 2023 | 공식 프로젝트 |
+| 원 목록 구조·링크·고정 커밋 | [Awesome Physical AI README](https://github.com/keon/awesome-physical-ai/blob/a6f62d11d9e7d1336a04927e86e3fbedc25a8456/README.md) | Keon Kim, commit 2026-06-24 | 고정 blob 직접 수집 |
+| 목록 라이선스 CC0 1.0 | [LICENSE](https://github.com/keon/awesome-physical-ai/blob/a6f62d11d9e7d1336a04927e86e3fbedc25a8456/LICENSE) | 저장소, 2026-06-24 snapshot | 연결 자원에는 비전파 |
+| provenance의 Entity·Activity·Agent | [PROV-O](https://www.w3.org/TR/prov-o/) | W3C, 2013-04-30 | Recommendation |
+| 데이터 그래프의 조건 검증·보고서 | [SHACL](https://www.w3.org/TR/shacl/) | W3C, 2017-07-20 | Recommendation |
+| 품질은 목적 적합성, 완전성은 범위 대비 비율 | [Data on the Web Best Practices](https://www.w3.org/TR/dwbp/) | W3C, 2017-01-31 | Recommendation |
+| 100만+ 궤적, 22 embodiment | [Open X-Embodiment](https://robotics-transformer-x.github.io/) | Open X-Embodiment Collaboration, 2023 | 공식 프로젝트 |
+| 97만 실제 로봇 시연 | [OpenVLA](https://proceedings.mlr.press/v270/kim25c.html) | Moo Jin Kim 외, PMLR 2025 | 출판 논문 페이지 |
+| 3만 미만 에피소드, 1천만 프레임, 품질·coverage 선별 | [SmolVLA](https://huggingface.co/blog/smolvla) | Hugging Face 연구팀, 2025-06-03 | 공식 기술 글 |
+| 사용자 지정 장치 저장소 | [OpenCat Quadruped Robot](https://github.com/PetoiCamp/OpenCat-Quadruped-Robot) | PetoiCamp, 2026-09-05 접근 | GitHub API 메타데이터 확인 |

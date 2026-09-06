@@ -320,6 +320,7 @@ export default function Home() {
           <span>CF</span>
           <div><strong>Campfire Foundry</strong><small>실제 데이터 워크벤치</small></div>
         </a>
+        <a className="catalog-nav" href="/catalog">Physical AI Ontology →</a>
         <div className="system-badges" aria-label="실행 환경">
           <span className="online"><i />D1 저장</span>
           <span>서버 계산</span>

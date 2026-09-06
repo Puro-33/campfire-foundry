@@ -9,6 +9,7 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
+    "crawl:ontology": "node scripts/crawl-physical-ai.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern lib/school-factory-core.js"
   },
   "dependencies": {
