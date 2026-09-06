@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Campfire Foundry · 증거 기반 경영 시뮬레이션",
+  title: "Campfire Foundry · 실제 데이터 워크벤치",
   description:
-    "현장의 증거와 사람의 판단을 마케팅, 제품, 생산, 재무 결정으로 연결하는 교육용 경영 시뮬레이션",
+    "근거 입력, D1 영구 저장, 서버 시뮬레이션, 온톨로지 감사 기록, 장치 영수증을 연결하는 실행형 워크벤치",
 };
 
 export default function RootLayout({
