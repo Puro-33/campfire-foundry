@@ -76,8 +76,10 @@ const stateLabels: Record<string, string> = {
   NEEDS_REVIEW: "재검토 필요",
   SIMULATED: "서버 계산 완료",
   DEVICE_JOB_REQUESTED: "장치 영수증 대기",
-  COMPLETED: "실행 확인",
-  DEVICE_FAILED: "장치 실행 실패",
+  COMPLETED: "기존 영수증 기록",
+  DEVICE_FAILED: "기존 실패 영수증",
+  RECEIPT_RECORDED: "사용자 영수증 기록",
+  FAILURE_REPORTED: "실패·중단 영수증 기록",
   ACTIVE: "활성",
   PROPOSED: "검토 대기",
   CONFIRMED: "사람 확인",
@@ -85,9 +87,12 @@ const stateLabels: Record<string, string> = {
   SELECTED: "선택됨",
   APPROVED: "승인됨",
   REQUESTED: "요청됨",
-  SUCCEEDED: "성공",
-  FAILED: "실패",
-  ABORTED: "중단",
+  SUCCEEDED: "기존 사용자 보고 성공",
+  FAILED: "기존 사용자 보고 실패",
+  ABORTED: "기존 사용자 보고 중단",
+  USER_REPORTED_SUCCEEDED: "사용자 보고 성공",
+  USER_REPORTED_FAILED: "사용자 보고 실패",
+  USER_REPORTED_ABORTED: "사용자 보고 중단",
 };
 
 const typeLabels: Record<string, string> = {
@@ -277,7 +282,7 @@ export default function Home() {
       const ok = await post("apply_device_receipt", {
         sessionId: workspace.active.session.id,
         receipt,
-      }, "영수증 형식과 작업 키의 일치를 확인해 결과 근거로 연결했습니다.");
+      }, "영수증 형식과 작업 키의 일치를 확인해 사용자 보고로 연결했습니다. 물리 실행은 검증하지 않았습니다.");
       if (ok) setReceiptText("");
     } catch {
       setError("영수증이 올바른 JSON인지 확인하세요.");
@@ -295,7 +300,7 @@ export default function Home() {
 
   const active = workspace?.active;
   const hypothesis = active?.objects.findLast((object) => object.object_type === "Hypothesis");
-  const evidence = active?.objects.filter((object) => object.object_type === "EvidenceItem" && object.payload.epistemic_class !== "OUTCOME") ?? [];
+  const evidence = active?.objects.filter((object) => object.object_type === "EvidenceItem" && !["OUTCOME", "USER_REPORT"].includes(String(object.payload.epistemic_class))) ?? [];
   const latestRun = active?.runs[0];
   const latestJob = active?.jobs[0];
   const metrics = latestRun?.result.finalSnapshot?.metrics ?? {};
@@ -306,7 +311,7 @@ export default function Home() {
 
   const progress = useMemo(() => {
     if (!active) return 0;
-    if (latestJob?.status === "SUCCEEDED") return 5;
+    if (latestJob?.receipt) return 5;
     if (latestJob) return 4;
     if (latestRun) return 3;
     if (hypothesisConfirmed) return 2;
@@ -320,7 +325,7 @@ export default function Home() {
           <span>CF</span>
           <div><strong>Campfire Foundry</strong><small>실제 데이터 워크벤치</small></div>
         </a>
-        <a className="catalog-nav" href="/catalog">Physical AI Ontology →</a>
+        <a className="catalog-nav" href="/catalog">Physical AI 설계기 →</a>
         <div className="system-badges" aria-label="실행 환경">
           <span className="online"><i />D1 저장</span>
           <span>서버 계산</span>
@@ -335,7 +340,7 @@ export default function Home() {
         </div>
         <p className="intro-copy">
           이 화면은 합성 성공을 보여주지 않습니다. 사용자가 넣은 근거는 데이터베이스에 남고,
-          시뮬레이션은 서버에서 실행되며, 장치는 일치하는 영수증이 들어와야만 완료됩니다.
+          시뮬레이션은 서버에서 실행되며, 장치 결과는 일치하는 영수증이 들어와도 사용자 보고로만 기록됩니다.
         </p>
       </section>
 
@@ -344,7 +349,7 @@ export default function Home() {
         <div><b>02</b><strong>영구 저장</strong><span>새로고침 후 복원</span></div>
         <div><b>03</b><strong>서버 모델</strong><span>버전·입력 해시 기록</span></div>
         <div><b>04</b><strong>온톨로지</strong><span>객체·관계·Action 감사</span></div>
-        <div><b>05</b><strong>장치 경계</strong><span>영수증 없이는 성공 금지</span></div>
+        <div><b>05</b><strong>장치 경계</strong><span>영수증은 사용자 보고로 기록</span></div>
       </div>
 
       {(error || notice) && (
@@ -511,7 +516,7 @@ export default function Home() {
                     </div>
                     {latestJob.receipt ? (
                       <div className="receipt-ok">
-                        <span>사용자가 가져온 영수증 · 작업 키 일치</span>
+                        <span>사용자가 가져온 영수증 · 형식·작업 키 일치 · 물리 실행 미검증</span>
                         <strong>{String(latestJob.receipt.device_id ?? "unknown device")} · {stateLabel(latestJob.status)}</strong>
                         <code>{String(latestJob.receipt.observed_at ?? "")}</code>
                       </div>

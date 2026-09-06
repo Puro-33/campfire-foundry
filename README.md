@@ -6,8 +6,11 @@
 
 - D1에 실험 세션, Evidence, Hypothesis, ProductSpec, ProductionPlan, ProductionRun, Action log 저장
 - 확인된 가설만 서버 시뮬레이션 실행
-- 장치 작업 JSON 생성 및 실제 gateway 영수증 검증
-- `/catalog`에서 Physical AI 연구 온톨로지 검색·필터·양방향 관계 추적
+- 자연어 목표를 `Goal → DesignPlan → CapabilityRequirement → CatalogSelection` 실행 그래프로 저장
+- `/catalog`에서 브라우저 권한·포트 접근 결과와 사용자의 설치·동의·안전 확인을 방법별로 기록
+- 단계별 실행기·입출력·STOP 조건이 있는 외부 어댑터용 작업 JSON 생성 및 내려받기(장치로 자동 전송하지 않음)
+- 반환 영수증의 작업 키와 요청·설계·증거 해시 형식을 대조해 외부 어댑터의 자기 보고로 저장
+- 카탈로그 링크는 출처가 있는 구현 참고 자료로만 취급하며 기능 성능이나 실제 물리 실행을 증명하지 않음
 - 모든 카탈로그 노드·관계에 출처 URL, 수집 시각, SHA-256, 검증 상태 저장
 
 ## 온톨로지 다시 수집

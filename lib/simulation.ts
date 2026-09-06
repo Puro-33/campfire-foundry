@@ -1,4 +1,3 @@
-// @ts-expect-error The private source engine is JavaScript without declaration files.
 import { EVENT_DEFINITIONS, POLICY_SPECS, SCENARIOS, Simulation } from "./school-factory-core.js";
 
 export const SIMULATION_MODEL_VERSION = "school-factory-core/1.0";

@@ -148,8 +148,15 @@ async function touchSession(db: D1Database, userId: string, sessionId: string, s
 }
 
 async function loadWorkspace(db: D1Database, userId: string, requestedSessionId?: string | null) {
-  const sessionQuery = await db.prepare(`SELECT id, name, state, created_at, updated_at
-    FROM cf_sessions WHERE user_id = ? ORDER BY updated_at DESC`).bind(userId).all<SessionRow>();
+  const sessionQuery = await db.prepare(`SELECT session.id, session.name, session.state,
+      session.created_at, session.updated_at
+    FROM cf_sessions session
+    WHERE session.user_id = ? AND EXISTS (
+      SELECT 1 FROM ontology_objects object
+      WHERE object.user_id = session.user_id AND object.session_id = session.id
+        AND object.object_type = 'EvidenceSession'
+    )
+    ORDER BY session.updated_at DESC`).bind(userId).all<SessionRow>();
   const sessions = sessionQuery.results ?? [];
   const activeSession = sessions.find((session) => session.id === requestedSessionId) ?? sessions[0] ?? null;
 
@@ -343,7 +350,7 @@ async function createDeviceJob(db: D1Database, userId: string, payload: JsonReco
   await assertSession(db, userId, sessionId);
   if (payload.intent !== "BEEP") throw new ApiError(400, "현재 허용된 장치 의도는 BEEP 하나뿐입니다.");
   const existing = await db.prepare(`SELECT id FROM device_jobs
-    WHERE user_id = ? AND session_id = ? AND status NOT IN ('SUCCEEDED','FAILED','ABORTED') LIMIT 1`)
+    WHERE user_id = ? AND session_id = ? AND status IN ('REQUESTED','RECEIPT_PROCESSING') LIMIT 1`)
     .bind(userId, sessionId).first<{ id: string }>();
   if (existing) throw new ApiError(409, "아직 영수증이 없는 장치 작업이 있습니다.");
   const plan = await db.prepare(`SELECT id, state FROM ontology_objects
@@ -393,39 +400,136 @@ async function applyDeviceReceipt(db: D1Database, userId: string, payload: JsonR
   if (!status) throw new ApiError(400, "영수증 상태는 SUCCEEDED, FAILED, ABORTED 중 하나여야 합니다.");
   const deviceId = textValue(receipt.device_id, "장치 ID", 160);
   const observedAt = textValue(receipt.observed_at, "관측 시각", 80);
-  if (Number.isNaN(Date.parse(observedAt))) throw new ApiError(400, "관측 시각은 ISO 날짜여야 합니다.");
+  const observedTimestamp = Date.parse(observedAt);
+  if (Number.isNaN(observedTimestamp) || new Date(observedTimestamp).toISOString() !== observedAt) {
+    throw new ApiError(400, "관측 시각은 정규화된 ISO 날짜여야 합니다.");
+  }
 
-  const job = await db.prepare(`SELECT id, production_run_object_id, status, idempotency_key, receipt_json
-    FROM device_jobs WHERE id = ? AND user_id = ? AND session_id = ?`).bind(jobId, userId, sessionId)
-    .first<{ id: string; production_run_object_id: string; status: string; idempotency_key: string; receipt_json: string | null }>();
+  const job = await db.prepare(`SELECT job.id, job.production_run_object_id, job.intent, job.status,
+      job.idempotency_key, job.request_json, job.receipt_json, object.object_type
+    FROM device_jobs job
+    JOIN ontology_objects object ON object.id = job.production_run_object_id
+      AND object.user_id = job.user_id AND object.session_id = job.session_id
+    WHERE job.id = ? AND job.user_id = ? AND job.session_id = ?`).bind(jobId, userId, sessionId)
+    .first<{
+      id: string;
+      production_run_object_id: string;
+      intent: string;
+      status: string;
+      idempotency_key: string;
+      request_json: string;
+      receipt_json: string | null;
+      object_type: string;
+    }>();
   if (!job || job.idempotency_key !== idempotencyKey) throw new ApiError(409, "작업과 영수증의 멱등 키가 일치하지 않습니다.");
-  const inputHash = await sha256(receipt);
-  if (["SUCCEEDED", "FAILED", "ABORTED"].includes(job.status)) {
-    if (await sha256(parseJson(job.receipt_json)) === inputHash) return sessionId;
+  const request = parseJson(job.request_json);
+  if (
+    job.intent !== "BEEP"
+    || job.object_type !== "ProductionRun"
+    || request.schema !== "campfire.device-job.v1"
+    || request.intent !== "BEEP"
+    || request.job_id !== jobId
+    || request.idempotency_key !== idempotencyKey
+  ) {
+    throw new ApiError(409, "경영 시뮬레이션 BEEP 작업만 이 영수증 경로에서 처리할 수 있습니다.");
+  }
+  const issuedAt = typeof request.issued_at === "string" ? request.issued_at : "";
+  const issuedTimestamp = Date.parse(issuedAt);
+  if (Number.isNaN(issuedTimestamp) || new Date(issuedTimestamp).toISOString() !== issuedAt) {
+    throw new ApiError(500, "저장된 작업 JSON의 발행 시각이 올바르지 않습니다.");
+  }
+  const allowedClockSkewMs = 5 * 60_000;
+  if (observedTimestamp < issuedTimestamp - allowedClockSkewMs || observedTimestamp > Date.now() + allowedClockSkewMs) {
+    throw new ApiError(409, "영수증 관찰 시각이 작업 발행 시각보다 지나치게 이르거나 현재보다 미래입니다.");
+  }
+  const receiptBase = {
+    schema: "campfire.device-receipt.v1",
+    job_id: jobId,
+    idempotency_key: idempotencyKey,
+    status,
+    device_id: deviceId,
+    observed_at: observedAt,
+    verification_scope: "SCHEMA_AND_JOB_KEY_ONLY",
+    physical_execution_verified: false,
+  } as const;
+  const inputHash = await sha256(receiptBase);
+  const receiptPayload = { ...receiptBase, receipt_hash_sha256: inputHash };
+  const storedReceiptMatches = (value: string | null | undefined) => {
+    const stored = parseJson(value ?? null) as JsonRecord | null;
+    return stored?.receipt_hash_sha256 === inputHash || Boolean(
+      stored
+      && stored.job_id === jobId
+      && stored.idempotency_key === idempotencyKey
+      && stored.status === status
+      && stored.device_id === deviceId
+      && stored.observed_at === observedAt,
+    );
+  };
+  const terminalStatuses = [
+    "USER_REPORTED_SUCCEEDED", "USER_REPORTED_FAILED", "USER_REPORTED_ABORTED",
+    "SUCCEEDED", "FAILED", "ABORTED",
+  ];
+  if (terminalStatuses.includes(job.status)) {
+    if (storedReceiptMatches(job.receipt_json)) return sessionId;
     throw new ApiError(409, "이미 다른 영수증으로 종료된 작업입니다.");
+  }
+  const claimedAt = now();
+  const staleBefore = new Date(Date.now() - 5 * 60_000).toISOString();
+  const claimed = await db.prepare(`UPDATE device_jobs SET status = 'RECEIPT_PROCESSING', updated_at = ?
+    WHERE id = ? AND user_id = ? AND session_id = ? AND intent = 'BEEP'
+      AND (status = 'REQUESTED' OR (status = 'RECEIPT_PROCESSING' AND updated_at < ?))`)
+    .bind(claimedAt, job.id, userId, sessionId, staleBefore).run();
+  if ((claimed.meta.changes ?? 0) !== 1) {
+    const current = await db.prepare("SELECT status, receipt_json FROM device_jobs WHERE id = ? AND user_id = ?")
+      .bind(job.id, userId).first<{ status: string; receipt_json: string | null }>();
+    if (current && terminalStatuses.includes(current.status) && storedReceiptMatches(current.receipt_json)) {
+      return sessionId;
+    }
+    throw new ApiError(409, current?.status === "RECEIPT_PROCESSING" ? "다른 영수증을 처리 중입니다." : "이 작업은 새 영수증을 받을 수 없는 상태입니다.");
   }
 
   const timestamp = now();
   const receiptId = id("receipt");
   const outcomeId = id("outcome");
-  await db.batch([
-    db.prepare("UPDATE device_jobs SET status = ?, receipt_json = ?, updated_at = ? WHERE id = ? AND user_id = ?")
-      .bind(status, JSON.stringify(receipt), timestamp, job.id, userId),
+  const reportedStatus = `USER_REPORTED_${status}`;
+  try {
+    await db.batch([
+    db.prepare("UPDATE device_jobs SET status = ?, receipt_json = ?, updated_at = ? WHERE id = ? AND user_id = ? AND intent = 'BEEP' AND status = 'RECEIPT_PROCESSING'")
+      .bind(reportedStatus, JSON.stringify(receiptPayload), timestamp, job.id, userId),
     db.prepare("UPDATE ontology_objects SET state = ?, version = version + 1, payload_json = ?, updated_at = ? WHERE id = ? AND user_id = ?")
-      .bind(status, JSON.stringify({ ...receipt, receipt_hash_sha256: inputHash }), timestamp, job.production_run_object_id, userId),
+      .bind(reportedStatus, JSON.stringify(receiptPayload), timestamp, job.production_run_object_id, userId),
     db.prepare(`INSERT INTO ontology_objects
       (id, session_id, user_id, object_type, state, version, payload_json, created_at, updated_at)
-      VALUES (?, ?, ?, 'DeviceReceipt', ?, 1, ?, ?, ?)`).bind(receiptId, sessionId, userId, status, JSON.stringify({ ...receipt, receipt_hash_sha256: inputHash }), timestamp, timestamp),
+      VALUES (?, ?, ?, 'DeviceReceipt', ?, 1, ?, ?, ?)`).bind(receiptId, sessionId, userId, reportedStatus, JSON.stringify(receiptPayload), timestamp, timestamp),
     db.prepare(`INSERT INTO ontology_objects
       (id, session_id, user_id, object_type, state, version, payload_json, created_at, updated_at)
-      VALUES (?, ?, ?, 'EvidenceItem', 'ACTIVE', 1, ?, ?, ?)`).bind(outcomeId, sessionId, userId, JSON.stringify({ kind: "PRODUCTION_MEASUREMENT", epistemic_class: "OUTCOME", content_summary: `${deviceId} · ${status}`, source_reference: receiptId, observed_at: observedAt }), timestamp, timestamp),
+      VALUES (?, ?, ?, 'EvidenceItem', 'ACTIVE', 1, ?, ?, ?)`).bind(outcomeId, sessionId, userId, JSON.stringify({
+        kind: "USER_REPORTED_DEVICE_RECEIPT",
+        epistemic_class: "USER_REPORT",
+        content_summary: `${deviceId} · 사용자 보고 ${status}`,
+        source_reference: receiptId,
+        observed_at: observedAt,
+        verification_scope: receiptPayload.verification_scope,
+        physical_execution_verified: false,
+      }), timestamp, timestamp),
     db.prepare("INSERT INTO ontology_relations (id, session_id, user_id, source_id, predicate, target_id, created_at) VALUES (?, ?, ?, ?, 'HAS_RECEIPT', ?, ?)")
       .bind(id("rel"), sessionId, userId, job.production_run_object_id, receiptId, timestamp),
     db.prepare("INSERT INTO ontology_relations (id, session_id, user_id, source_id, predicate, target_id, created_at) VALUES (?, ?, ?, ?, 'PRODUCES', ?, ?)")
       .bind(id("rel"), sessionId, userId, job.production_run_object_id, outcomeId, timestamp),
-    actionStatement(db, userId, sessionId, "ImportDeviceReceipt", "PARTICIPANT_IMPORT", "ProductionRun", job.production_run_object_id, job.status, status, inputHash, { device_id: deviceId, observed_at: observedAt, verification: "schema_and_job_key_only" }, timestamp),
-  ]);
-  await touchSession(db, userId, sessionId, status === "SUCCEEDED" ? "COMPLETED" : "DEVICE_FAILED", timestamp);
+    actionStatement(db, userId, sessionId, "ImportDeviceReceipt", "PARTICIPANT_IMPORT", "ProductionRun", job.production_run_object_id, "REQUESTED", reportedStatus, inputHash, {
+      device_id: deviceId,
+      observed_at: observedAt,
+      verification: "schema_and_job_key_only",
+      physical_execution_verified: false,
+    }, timestamp),
+    ]);
+  } catch (cause) {
+    await db.prepare(`UPDATE device_jobs SET status = 'REQUESTED', updated_at = ?
+      WHERE id = ? AND user_id = ? AND intent = 'BEEP' AND status = 'RECEIPT_PROCESSING'`)
+      .bind(now(), job.id, userId).run();
+    throw cause;
+  }
+  await touchSession(db, userId, sessionId, status === "SUCCEEDED" ? "RECEIPT_RECORDED" : "FAILURE_REPORTED", timestamp);
   return sessionId;
 }
 

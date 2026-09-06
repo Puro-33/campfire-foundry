@@ -3,18 +3,18 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://campfire-foundry-lab.junghuncha40.chatgpt.site"),
-  title: "Campfire Foundry · 실제 데이터 워크벤치",
+  title: "Campfire Foundry · Physical AI 설계기",
   description:
-    "근거 입력, D1 영구 저장, 서버 시뮬레이션, 온톨로지 감사 기록, 장치 영수증을 연결하는 실행형 워크벤치",
+    "자연어 목표를 온톨로지 근거, 장치 점검, 안전 게이트와 연결해 검토할 수 있는 작업 명세로 바꾸는 워크벤치",
   openGraph: {
     title: "Campfire Foundry",
-    description: "Physical AI Evidence Graph",
-    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Campfire Foundry Physical AI Evidence Graph" }],
+    description: "Ontology-backed Physical AI Workbench",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Campfire Foundry Physical AI 설계기" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "Campfire Foundry",
-    description: "Physical AI Evidence Graph",
+    description: "Ontology-backed Physical AI Workbench",
     images: ["/og.png"],
   },
 };

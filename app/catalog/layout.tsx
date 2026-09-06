@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Physical AI Evidence Graph | Campfire Foundry",
-  description: "Awesome Physical AI를 출처·검증 상태와 함께 검색하고 관계를 추적하는 온톨로지 탐색기",
+  title: "Physical AI 설계기 | Campfire Foundry",
+  description: "목표를 센서·정책·데이터·안전 게이트와 연결해 검토할 수 있는 외부 어댑터 작업 명세로 변환합니다.",
   openGraph: {
-    title: "Campfire Foundry",
-    description: "Physical AI Evidence Graph",
-    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Campfire Foundry Physical AI Evidence Graph" }],
+    title: "Campfire Foundry — Physical AI 설계기",
+    description: "목표에서 검토 가능한 외부 어댑터 작업 명세까지",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Campfire Foundry Physical AI 설계기" }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Campfire Foundry",
-    description: "Physical AI Evidence Graph",
+    title: "Campfire Foundry — Physical AI 설계기",
+    description: "목표에서 검토 가능한 외부 어댑터 작업 명세까지",
     images: ["/og.png"],
   },
 };
