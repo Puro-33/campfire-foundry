@@ -26,6 +26,12 @@ npm run crawl:ontology -- --skip-arxiv
 
 생성물은 `data/physical-ai-ontology.v1.json`이며, 빌드된 사이트가 버전 해시를 확인해 D1에 멱등 적재합니다.
 
+새 배포에서 데이터를 미리 적재할 때는 새 번호의 migration 경로를 명시해 생성합니다. 이미 적용된 migration 파일을 재사용하면 안 됩니다.
+
+```bash
+npm run build:ontology-migration -- data/physical-ai-ontology.v1.json drizzle/0002_physical_ai_seed.sql
+```
+
 ## 검증
 
 ```bash

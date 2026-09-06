@@ -10,6 +10,7 @@
     "build": "vinext build",
     "start": "vinext start",
     "crawl:ontology": "node scripts/crawl-physical-ai.mjs",
+    "build:ontology-migration": "node scripts/build-catalog-seed-migration.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern lib/school-factory-core.js"
   },
   "dependencies": {
