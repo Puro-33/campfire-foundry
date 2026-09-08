@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   PHONE_RUNTIME_VERSION,
@@ -1313,12 +1312,12 @@ export default function SmartphoneRuntimePage() {
   return (
     <main className={styles.page}>
       <header className={styles.topbar}>
-        <Link href={sessionId ? `/catalog?session=${encodeURIComponent(sessionId)}` : "/catalog"} className={styles.brand}>
+        <a href={sessionId ? `/catalog?session=${encodeURIComponent(sessionId)}` : "/catalog"} className={styles.brand}>
           <span>CF</span>
           <div><strong>Campfire Phone Runtime</strong><small>스마트폰 센서 · ROS 2 시뮬레이션</small></div>
-        </Link>
+        </a>
         <nav>
-          <Link href="/catalog">설계기로 돌아가기</Link>
+          <a href="/catalog">설계기로 돌아가기</a>
           <a href="https://github.com/Puro-33/campfire-foundry" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
       </header>
