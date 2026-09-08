@@ -49,6 +49,12 @@ type DesignerResponse = {
 
 const templates = [
   {
+    title: "스마트폰 비전 안내",
+    goal: "스마트폰 카메라로 주변 움직임을 로컬에서 감지하고 화면과 진동으로 방향을 안내하기",
+    deviceProfile: "smartphone",
+    successMetric: "30초 동안 움직임 관찰 20개 이상을 만들고 원시 프레임을 저장하거나 서버에 업로드하지 않기",
+  },
+  {
     title: "OpenCat 사람 추종",
     goal: "OpenCat이 스마트폰 카메라로 한 사람을 식별하고 안전 거리를 유지하며 따라오게 만들기",
     deviceProfile: "opencat_phone",
@@ -83,6 +89,7 @@ const statusLabels: Record<string, string> = {
   JOB_MANIFEST_CREATED: "JSON 생성·영수증 대기",
   RECEIPT_RECORDED: "영수증 JSON 기록됨",
   FAILURE_REPORTED: "실패·중단 영수증 기록됨",
+  EXECUTION_ABORTED: "사용자 중단 영수증 기록됨",
   LOCAL_CHANGES: "변경 후 다시 확인 필요",
   COMPLETED: "기존 완료 기록",
   DEVICE_FAILED: "기존 실패 기록",
@@ -413,7 +420,7 @@ export default function PhysicalAiDesignerPage() {
   const needsRobot = plan?.capabilities.some((capability) => capability.id === "robot_transport");
   const state = active?.state ?? "DRAFT";
   const displayState = validationDirty && state === "MANIFEST_READY" ? "LOCAL_CHANGES" : state;
-  const stateTone = displayState === "MANIFEST_READY" || displayState === "RECEIPT_RECORDED" ? styles.good : displayState === "BLOCKED" || displayState === "FAILURE_REPORTED" || displayState === "LOCAL_CHANGES" ? styles.bad : styles.waiting;
+  const stateTone = displayState === "MANIFEST_READY" || displayState === "RECEIPT_RECORDED" ? styles.good : displayState === "BLOCKED" || displayState === "FAILURE_REPORTED" || displayState === "EXECUTION_ABORTED" || displayState === "LOCAL_CHANGES" ? styles.bad : styles.waiting;
   const validationCurrent = Boolean(validation && !validationDirty);
 
   return (
@@ -423,7 +430,7 @@ export default function PhysicalAiDesignerPage() {
           <span>CF</span>
           <div><strong>Campfire Foundry</strong><small>Physical AI workbench</small></div>
         </Link>
-        <nav><a href="#designer">설계</a><a href="#blueprint">명세 구조</a><a href="/api/catalog/export">온톨로지 원본</a></nav>
+        <nav><a href="#designer">설계</a><Link href="/runtime">스마트폰 ROS</Link><a href="#blueprint">명세 구조</a><a href="/api/catalog/export">온톨로지 원본</a></nav>
       </header>
 
       <section className={styles.mission} id="designer">
@@ -534,6 +541,7 @@ export default function PhysicalAiDesignerPage() {
               {validationCurrent && validation && <button type="button" onClick={() => downloadJson(validation.manifest, `physical-ai-manifest-${plan.id}.json`)}>검토 명세 내려받기</button>}
               {!job && <button type="button" className={styles.issueButton} onClick={() => void issueJob()} disabled={!validationCurrent || validation?.status !== "ATTESTED" || Boolean(busy)}>{busy === "job" ? "JSON 생성 중…" : "외부 어댑터용 JSON 만들기"}</button>}
               {job?.request && <button type="button" className={styles.issueButton} onClick={() => downloadJson(job.request, `device-job-${job.id}.json`)}>작업 JSON 내려받기</button>}
+              {job?.request && <Link className={styles.runtimeLink} href={`/runtime?session=${encodeURIComponent(active?.sessionId ?? "")}`}>스마트폰에서 실행 →</Link>}
             </div>
           </section>
 
@@ -541,6 +549,7 @@ export default function PhysicalAiDesignerPage() {
             <div><span>외부 어댑터 영수증 JSON 가져오기</span><strong>작업 {job.id}</strong><p id="adapter-receipt-help">반환 JSON의 작업 키, 요청·설계 해시와 증거 해시 형식을 대조해 기록합니다. 장치 서명이나 측정 내용은 검증하지 않습니다.</p></div>
             <div className={styles.receiptInput}><label htmlFor="adapter-receipt-json">외부 어댑터 영수증 JSON</label>
             <textarea id="adapter-receipt-json" aria-describedby="adapter-receipt-help" value={receiptText} onChange={(event) => setReceiptText(event.target.value)} placeholder={JSON.stringify({
+              schema: "campfire.device-receipt.v2",
               job_id: job.id,
               idempotency_key: job.idempotencyKey,
               request_hash_sha256: typeof job.request?.request_hash_sha256 === "string" ? job.request.request_hash_sha256 : "작업 JSON의 request_hash_sha256",
@@ -549,6 +558,13 @@ export default function PhysicalAiDesignerPage() {
               device_id: "external-adapter-01",
               observed_at: new Date().toISOString(),
               evidence_hash_sha256: "장치 측정 파일의 SHA-256",
+              attempt_id: `attempt-${crypto.randomUUID()}`,
+              execution_mode: plan.scenario.id === "person_following" ? "ROS2_SIMULATION" : "PHONE_CLOSED_LOOP",
+              reason_code: "USER_REPORTED_COMPLETE",
+              terminal_step: "evidence_finalized",
+              metrics: { sample_count: 1 },
+              artifact: { media_type: "application/json", byte_length: 2, hash_sha256: "위와 같은 증거 SHA-256", storage: "USER_DEVICE_ONLY" },
+              physical_execution_verified: false,
             }, null, 2)} required /></div>
             <button disabled={busy === "receipt"}>{busy === "receipt" ? "대조 중…" : "영수증 대조·기록"}</button>
           </form>}

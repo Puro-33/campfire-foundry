@@ -185,8 +185,9 @@
 .executionRail strong { display: block; font-size: 15px; margin-top: 6px; }
 .executionRail p { color: #b7c3cf; font-size: 11px; line-height: 1.55; margin: 6px 0 0; max-width: 740px; }
 .executionActions { display: flex; flex-wrap: wrap; gap: 7px; justify-content: end; }
-.executionActions button { background: transparent; border: 1px solid #617187; color: #d8e0ea; cursor: pointer; font-size: 11px; font-weight: 800; min-height: 44px; padding: 0 12px; }
+.executionActions button, .executionActions a { align-items: center; background: transparent; border: 1px solid #617187; color: #d8e0ea; cursor: pointer; display: inline-flex; font-size: 11px; font-weight: 800; justify-content: center; min-height: 44px; padding: 0 12px; text-decoration: none; }
 .executionActions .issueButton { background: #f2f5fa; border-color: #f2f5fa; color: var(--ink); }
+.executionActions .runtimeLink { background: var(--orange); border-color: var(--orange); color: white; }
 .executionActions button:disabled { cursor: not-allowed; opacity: .35; }
 
 .receiptPanel { background: #eef0eb; border: 1px solid var(--line); display: grid; gap: 18px; grid-template-columns: .7fr 1fr auto; margin-top: 12px; padding: 18px; }

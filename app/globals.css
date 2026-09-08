@@ -84,8 +84,9 @@ main { min-height: 100vh; }
 .brand small { color: var(--muted); font-size: 11px; }
 
 .system-badges { align-items: center; display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
-.catalog-nav { color: var(--blue); font-size: 10px; font-weight: 850; margin-left: auto; margin-right: 14px; text-decoration: none; }
-.catalog-nav:hover { text-decoration: underline; }
+.catalog-nav { display: flex; gap: 12px; margin-left: auto; margin-right: 14px; }
+.catalog-nav a { color: var(--blue); font-size: 10px; font-weight: 850; text-decoration: none; }
+.catalog-nav a:hover { text-decoration: underline; }
 
 .system-badges span {
   background: var(--wash);

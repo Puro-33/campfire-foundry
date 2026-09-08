@@ -1,0 +1,11 @@
+campfire_phone_sim_adapter:
+  ros__parameters:
+    simulation_only: true
+    cmd_vel_topic: /turtle1/cmd_vel
+    max_linear_speed: 0.8
+    max_angular_speed: 2.0
+    minimum_confidence: 0.20
+    vision_timeout_seconds: 0.75
+    require_runtime_running: true
+    minimum_runtime_lease_ms: 500
+    maximum_runtime_lease_ms: 5000

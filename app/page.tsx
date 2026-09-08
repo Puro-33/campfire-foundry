@@ -325,7 +325,7 @@ export default function Home() {
           <span>CF</span>
           <div><strong>Campfire Foundry</strong><small>실제 데이터 워크벤치</small></div>
         </a>
-        <a className="catalog-nav" href="/catalog">Physical AI 설계기 →</a>
+        <div className="catalog-nav"><a href="/catalog">Physical AI 설계기</a><a href="/runtime">스마트폰 ROS 실행기 →</a></div>
         <div className="system-badges" aria-label="실행 환경">
           <span className="online"><i />D1 저장</span>
           <span>서버 계산</span>

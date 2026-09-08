@@ -1,4 +1,4 @@
-export const PLANNER_VERSION = "campfire-physical-ai-planner/1.2.0";
+export const PLANNER_VERSION = "campfire-physical-ai-planner/1.3.1";
 
 export const DEVICE_PROFILES = {
   opencat_phone: {
@@ -178,6 +178,24 @@ export type PlanValidation = {
     observationContract: PhysicalAiPlan["observationContract"];
     stages: PhysicalAiPlan["stages"];
     executionContract: PhysicalAiPlan["protocol"];
+    smartphoneRuntime: {
+      adapter: "campfire.smartphone-runtime.v1";
+      permittedScenarios: Array<"phone_vision_guide" | "gait_route" | "campfire_memory">;
+      personFollowingPolicy: "ROS2_SIMULATION_ONLY";
+      rawSensorUploadToSite: false;
+      rawCameraFramesStored: false;
+      rawAudioStored: false;
+      evidenceStorage: "USER_DEVICE_ONLY";
+      physicalMotionSupported: false;
+    };
+    ros2: {
+      contract: "campfire.ros2-phone-bridge.v1";
+      compatibleDistribution: "Jazzy_or_later";
+      transport: "rosbridge_websocket_v2";
+      bridgeProvidedBySite: false;
+      simulationOnly: true;
+      topics: Record<string, { name: string; type: string; direction: "publish" | "subscribe" }>;
+    };
     evidencePolicy: {
       catalogLinksProveCapability: false;
       selectedByUser: true;
@@ -235,9 +253,20 @@ const CAPABILITIES: Record<string, CapabilityDefinition> = {
     externalHint: "Clova Speech 또는 동등한 STT API 연결이 필요합니다.",
   },
   gait_sensor_fusion: {
-    id: "gait_sensor_fusion", label: "모션·위치 결합 어댑터", phase: "interpret", kind: "external",
-    why: "가속도·자이로·GPS 관찰을 같은 시간축으로 결합하는 외부 구현이 필요합니다.", terms: [],
-    externalHint: "모션·위치 이벤트를 시간 기준으로 결합하는 외부 어댑터 연결이 필요합니다.",
+    id: "gait_sensor_fusion", label: "모션·위치 결합 어댑터", phase: "interpret", kind: "workbench",
+    why: "스마트폰 런타임이 가속도·자이로·GPS 관찰을 같은 단조 시각으로 결합합니다.", terms: [],
+  },
+  local_motion_tracking: {
+    id: "local_motion_tracking", label: "로컬 움직임 중심 추적", phase: "interpret", kind: "workbench",
+    why: "카메라 프레임 차이로 움직임 중심을 계산합니다. 사람 식별이나 신원 인식 기능은 아닙니다.", terms: [],
+  },
+  phone_feedback: {
+    id: "phone_feedback", label: "화면·진동 피드백", phase: "act", kind: "workbench",
+    why: "스마트폰 화면과 선택적 진동으로 관찰 결과를 되돌려 작은 폐쇄루프를 만듭니다.", terms: [],
+  },
+  ros_simulation_bridge: {
+    id: "ros_simulation_bridge", label: "ROS 2 시뮬레이션 브리지", phase: "act", kind: "workbench",
+    why: "명시적 동의와 시뮬레이션 확인이 있을 때 스마트폰 관찰을 사용자 제공 rosbridge의 시뮬레이터 토픽으로 전달합니다.", terms: [],
   },
   robot_policy: {
     id: "robot_policy", label: "행동 정책", phase: "decide", kind: "catalog",
@@ -278,7 +307,7 @@ const CAPABILITIES: Record<string, CapabilityDefinition> = {
   },
 };
 
-type ScenarioId = "person_following" | "campfire_memory" | "gait_route" | "general_physical_ai";
+export type ScenarioId = "person_following" | "phone_vision_guide" | "campfire_memory" | "gait_route" | "general_physical_ai";
 
 const SCENARIOS: Record<ScenarioId, {
   title: string;
@@ -287,6 +316,17 @@ const SCENARIOS: Record<ScenarioId, {
   observationSchema: string;
   observationFields: readonly string[];
 }> = {
+  phone_vision_guide: {
+    title: "스마트폰 비전 움직임 안내",
+    signalGroups: [
+      ["스마트폰", "휴대폰", "phone"],
+      ["카메라", "비전", "vision", "camera"],
+      ["안내", "진동", "화면", "가이드", "guide", "feedback"],
+    ],
+    capabilityIds: ["camera_sensor", "local_motion_tracking", "phone_feedback", "ros_simulation_bridge", "privacy_gate", "safety_receipt"],
+    observationSchema: "campfire.observation.motion-guide.v1",
+    observationFields: ["captured_at", "motion_ratio", "centroid_x", "centroid_y", "confidence"],
+  },
   person_following: {
     title: "사람 추종형 사족보행 로봇",
     signalGroups: [
@@ -336,6 +376,33 @@ const PHASES: Array<{ id: PhaseId; label: string }> = [
 ];
 
 const PROTOCOLS: Record<ScenarioId, ExecutionStep[]> = {
+  phone_vision_guide: [
+    {
+      id: "confirm-camera-consent", phase: "sense", capabilityIds: ["privacy_gate"], operation: "촬영 대상과 목적을 확인하고 로컬 처리 동의를 기록한다.",
+      executor: "workbench", inputs: ["participant_consent", "purpose"], outputs: ["local_consent_record"],
+      stopConditions: ["동의 없음", "동의 철회", "화면 백그라운드 전환"],
+    },
+    {
+      id: "observe-motion", phase: "sense", capabilityIds: ["camera_sensor"], operation: "카메라 프레임을 로컬에서 읽고 처리 후 즉시 폐기한다.",
+      executor: "browser_sensor_adapter", inputs: ["camera_frame"], outputs: ["ephemeral_frame"],
+      stopConditions: ["카메라 권한 철회", "영상 입력 중단", "사용자 중단"],
+    },
+    {
+      id: "estimate-motion-centroid", phase: "interpret", capabilityIds: ["local_motion_tracking"], operation: "연속 프레임의 밝기 차이로 움직임 비율과 중심을 계산한다. 사람 신원은 식별하지 않는다.",
+      executor: "workbench", inputs: ["ephemeral_frame"], outputs: ["motion_observation"],
+      stopConditions: ["표본 없음", "프레임 처리 오류"],
+    },
+    {
+      id: "render-phone-feedback", phase: "act", capabilityIds: ["phone_feedback", "ros_simulation_bridge"], operation: "기본적으로 화면 또는 짧은 진동으로 안내하고, 사용자가 ROS 연결·데이터 전송·시뮬레이션을 모두 확인한 경우에만 같은 관찰을 ROS 2 시뮬레이터로 전달한다.",
+      executor: "browser_sensor_adapter", inputs: ["motion_observation", "feedback_consent", "optional_ros_simulation_attestation"], outputs: ["feedback_event", "optional_simulator_feedback"],
+      stopConditions: ["피드백 동의 철회", "ROS 임대 만료", "시뮬레이션 확인 철회", "사용자 중단"],
+    },
+    {
+      id: "hash-local-evidence", phase: "verify", capabilityIds: ["safety_receipt"], operation: "로컬 evidence JSON의 실제 바이트를 해시하고 사용자 보고 영수증을 만든다.",
+      executor: "workbench", inputs: ["motion_observation", "local_consent_record"], outputs: ["evidence_artifact", "runtime_receipt"],
+      stopConditions: ["증거 해시 실패", "필수 측정 누락"],
+    },
+  ],
   person_following: [
     {
       id: "confirm-target-and-zone", phase: "sense", capabilityIds: ["privacy_gate", "safety_receipt"], operation: "대상자 동의, 추종 대상, 안전 구역과 비상 정지 수단을 확인한다.",
@@ -417,8 +484,8 @@ const PROTOCOLS: Record<ScenarioId, ExecutionStep[]> = {
       stopConditions: ["모션 권한 철회", "위치 권한 철회", "시각 기준 손실", "세션 종료"],
     },
     {
-      id: "fuse-route-observation", phase: "interpret", capabilityIds: ["gait_sensor_fusion"], operation: "시각 기준으로 모션과 위치 관찰을 결합해 경로 관찰 객체를 만든다.",
-      executor: "external_model_adapter", inputs: ["timestamped_sensor_observation"], outputs: ["gait_route_observation", "external_adapter_receipt", "evidence_artifact"],
+      id: "fuse-route-observation", phase: "interpret", capabilityIds: ["gait_sensor_fusion"], operation: "스마트폰 런타임이 단조 시각 기준으로 모션과 위치 관찰을 결합해 경로 관찰 객체와 로컬 증거를 만든다.",
+      executor: "workbench", inputs: ["timestamped_sensor_observation"], outputs: ["gait_route_observation", "evidence_artifact"],
       stopConditions: ["필수 필드 누락", "허용 오차 초과"],
     },
     {
@@ -432,8 +499,8 @@ const PROTOCOLS: Record<ScenarioId, ExecutionStep[]> = {
       stopConditions: ["누락률 기준 초과", "시각 오차 기준 초과", "동의 범위 불일치"],
     },
     {
-      id: "record-external-receipt", phase: "verify", capabilityIds: ["safety_receipt"], operation: "외부 센서 융합 어댑터의 작업 키·요청 해시·증거 해시가 담긴 영수증 JSON을 기록한다.",
-      executor: "workbench", inputs: ["external_adapter_receipt", "evidence_artifact", "route_quality_record"], outputs: ["recorded_external_report"],
+      id: "record-phone-runtime-receipt", phase: "verify", capabilityIds: ["safety_receipt"], operation: "스마트폰 로컬 증거의 실제 바이트 해시와 작업 키가 담긴 사용자 보고 영수증 JSON을 기록한다.",
+      executor: "workbench", inputs: ["evidence_artifact", "route_quality_record"], outputs: ["recorded_runtime_report"],
       stopConditions: ["작업 키 불일치", "요청·설계 해시 불일치", "증거 해시 누락"],
     },
   ],
@@ -461,7 +528,7 @@ function inspectIntent(goal: string, scenarioId: ScenarioId) {
   const negated = negatedOperations.find((term) => normalized.includes(term));
   if (negated) return { allowed: false, reason: `부정형 요구(${negated})를 반대 의미의 작업으로 변환하지 않습니다. 수행할 긍정 목표로 다시 적어 주세요.` };
   if (scenarioId === "general_physical_ai") {
-    return { allowed: false, reason: "현재는 사람 추종, 동의 기반 대화 기억, 스마트폰 보행 경로의 세 가지 명세만 지원합니다." };
+    return { allowed: false, reason: "현재는 스마트폰 비전 안내, 사람 추종 시뮬레이션, 동의 기반 대화 기억, 스마트폰 보행 경로의 네 가지 명세만 지원합니다." };
   }
   return { allowed: true, reason: "지원하는 고수준 명세 유형입니다. raw serial·관절 직접 명령은 만들지 않습니다." };
 }
@@ -606,9 +673,10 @@ export function validatePlan(plan: PhysicalAiPlan, input: ValidationInput): Plan
     ? "CLIENT_PROBE_AND_USER_ATTESTATION"
     : "CLIENT_REPORTED_PROBE";
   const blockedDevice = deviceCapabilities.filter((capability) => {
+    const declaredByProfile = plan.device.declaredCapabilities.includes(capability.id);
     const runtimeAvailable = capability.runtimeKey ? input.runtime[capability.runtimeKey] : false;
-    if (capability.id === "robot_transport") return !(runtimeAvailable && input.deviceConfirmed);
-    return !runtimeAvailable;
+    if (capability.id === "robot_transport") return !(declaredByProfile && runtimeAvailable && input.deviceConfirmed);
+    return !(declaredByProfile && runtimeAvailable);
   });
   const needsExternal = plan.capabilities.some((capability) => capability.kind === "external");
   const needsConsent = plan.capabilities.some((capability) => capability.id === "privacy_gate");
@@ -628,8 +696,11 @@ export function validatePlan(plan: PhysicalAiPlan, input: ValidationInput): Plan
       };
     }
     if (capability.kind === "device") {
+      const declaredByProfile = plan.device.declaredCapabilities.includes(capability.id);
       const runtimeAvailable = capability.runtimeKey ? input.runtime[capability.runtimeKey] : false;
-      const recorded = capability.id === "robot_transport" ? runtimeAvailable && input.deviceConfirmed : runtimeAvailable;
+      const recorded = capability.id === "robot_transport"
+        ? declaredByProfile && runtimeAvailable && input.deviceConfirmed
+        : declaredByProfile && runtimeAvailable;
       return {
         capabilityId: capability.id,
         state: recorded ? "CLIENT_REPORTED" : "BLOCKED",
@@ -717,6 +788,31 @@ export function validatePlan(plan: PhysicalAiPlan, input: ValidationInput): Plan
       observationContract: plan.observationContract,
       stages: plan.stages,
       executionContract,
+      smartphoneRuntime: {
+        adapter: "campfire.smartphone-runtime.v1",
+        permittedScenarios: ["phone_vision_guide", "gait_route", "campfire_memory"],
+        personFollowingPolicy: "ROS2_SIMULATION_ONLY",
+        rawSensorUploadToSite: false,
+        rawCameraFramesStored: false,
+        rawAudioStored: false,
+        evidenceStorage: "USER_DEVICE_ONLY",
+        physicalMotionSupported: false,
+      },
+      ros2: {
+        contract: "campfire.ros2-phone-bridge.v1",
+        compatibleDistribution: "Jazzy_or_later",
+        transport: "rosbridge_websocket_v2",
+        bridgeProvidedBySite: false,
+        simulationOnly: true,
+        topics: {
+          imu: { name: "/campfire/phone/imu", type: "sensor_msgs/msg/Imu", direction: "publish" },
+          navsat: { name: "/campfire/phone/navsat", type: "sensor_msgs/msg/NavSatFix", direction: "publish" },
+          vision: { name: "/campfire/phone/vision", type: "std_msgs/msg/String", direction: "publish" },
+          transcript: { name: "/campfire/phone/transcript", type: "std_msgs/msg/String", direction: "publish" },
+          runtime: { name: "/campfire/phone/runtime", type: "std_msgs/msg/String", direction: "publish" },
+          feedback: { name: "/campfire/phone/feedback", type: "std_msgs/msg/String", direction: "subscribe" },
+        },
+      },
       evidencePolicy: {
         catalogLinksProveCapability: false,
         selectedByUser: true,

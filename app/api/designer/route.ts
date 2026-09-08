@@ -337,7 +337,10 @@ async function loadDesigner(db: D1Database, userId: string, requestedSessionId?:
   const designRow = objects.findLast((object) => parseJson<JsonRecord>(object.payload_json)?.schema === "campfire.physical-ai-design.v1");
   if (!designRow) return { history, active: null };
   const validationRow = objects.findLast((object) => parseJson<JsonRecord>(object.payload_json)?.schema === "campfire.physical-ai-validation.v1");
-  const receiptRow = objects.findLast((object) => parseJson<JsonRecord>(object.payload_json)?.schema === "campfire.device-receipt.v1");
+  const receiptRow = objects.findLast((object) => {
+    const schema = parseJson<JsonRecord>(object.payload_json)?.schema;
+    return schema === "campfire.device-receipt.v1" || schema === "campfire.device-receipt.v2";
+  });
   return {
     history,
     active: {
@@ -681,7 +684,7 @@ async function issueDeviceJob(db: D1Database, userId: string, payload: JsonRecor
   const manifestId = id("manifest");
   const idempotencyKey = crypto.randomUUID();
   const requestBase = {
-    schema: "campfire.device-job.v2",
+    schema: "campfire.device-job.v3",
     job_id: jobId,
     manifest_id: manifestId,
     design_id: designId,
@@ -691,27 +694,32 @@ async function issueDeviceJob(db: D1Database, userId: string, payload: JsonRecor
     intent: "SUBMIT_EXPERIMENT_MANIFEST",
     issued_at: timestamp,
     delivery_status: "NOT_SENT",
-    execution_authority: "EXTERNAL_ADAPTER_REQUIRED",
+    execution_authority: "BROWSER_OR_EXTERNAL_ADAPTER_REQUIRED",
     physical_execution_verified_by_site: false,
     device_profile: plan.device.id,
     goal: plan.goal,
     experiment: validation.manifest,
     receipt_contract: {
-      schema: "campfire.device-receipt.v1",
+      schema: "campfire.device-receipt.v2",
       required_fields: [
+        "schema",
         "job_id", "idempotency_key", "request_hash_sha256", "design_hash_sha256",
-        "status", "device_id", "observed_at", "evidence_hash_sha256",
+        "status", "device_id", "observed_at", "evidence_hash_sha256", "attempt_id",
+        "execution_mode", "reason_code", "terminal_step", "metrics", "artifact",
+        "physical_execution_verified",
       ],
       accepted_statuses: ["SUCCEEDED", "FAILED", "ABORTED"],
       copy_from_request: ["job_id", "idempotency_key", "design_hash_sha256"],
       request_hash_source: "top_level.request_hash_sha256",
       evidence_hash_format: "lowercase_sha256_hex",
-      verification_scope: "SCHEMA_JOB_KEY_REQUEST_HASH_DESIGN_HASH_AND_EVIDENCE_HASH_ONLY",
+      verification_scope: "SERVER_JOB_KEYS_AND_HASH_FORMAT_PLUS_CLIENT_HASHED_LOCAL_ARTIFACT_CLAIM",
       physical_execution_verified_by_site: false,
     },
     safety: {
       raw_serial_allowed: false,
       joint_commands_allowed: false,
+      physical_hardware_allowed_by_smartphone_runtime: false,
+      person_following_mode: "ROS2_SIMULATION_ONLY",
       human_approval_required: true,
       receipt_required: true,
     },
@@ -798,7 +806,7 @@ async function applyDeviceReceipt(db: D1Database, userId: string, payload: JsonR
   if (
     job.intent !== "SUBMIT_EXPERIMENT_MANIFEST"
     || job.object_type !== "DeviceJobManifest"
-    || request.schema !== "campfire.device-job.v2"
+    || (request.schema !== "campfire.device-job.v2" && request.schema !== "campfire.device-job.v3")
     || request.intent !== "SUBMIT_EXPERIMENT_MANIFEST"
     || request.job_id !== jobId
     || request.manifest_id !== job.production_run_object_id
@@ -829,21 +837,81 @@ async function applyDeviceReceipt(db: D1Database, userId: string, payload: JsonR
   ) {
     throw new ApiError(409, "영수증의 요청·설계 해시가 저장된 작업 JSON과 일치하지 않습니다.");
   }
-  const receiptBase = {
-    schema: "campfire.device-receipt.v1",
-    job_id: jobId,
-    idempotency_key: idempotencyKey,
-    status,
-    device_id: deviceId,
-    observed_at: observedAt,
-    evidence_hash_sha256: evidenceHash,
-    request_hash_sha256: submittedRequestHash,
-    design_hash_sha256: submittedDesignHash,
-    verification_scope: "SCHEMA_JOB_KEY_REQUEST_HASH_DESIGN_HASH_AND_EVIDENCE_HASH_ONLY",
-    physical_execution_verified: false,
-  } as const;
+  let receiptBase: JsonRecord;
+  if (request.schema === "campfire.device-job.v3") {
+    if (receipt.schema !== "campfire.device-receipt.v2") throw new ApiError(400, "v3 작업에는 v2 영수증 스키마가 필요합니다.");
+    const attemptId = textValue(receipt.attempt_id, "실행 시도 ID", 8, 180);
+    if (!/^[a-zA-Z0-9_.:-]+$/.test(attemptId)) throw new ApiError(400, "실행 시도 ID 형식이 올바르지 않습니다.");
+    const executionMode = receipt.execution_mode === "PHONE_CLOSED_LOOP" || receipt.execution_mode === "ROS2_SIMULATION"
+      ? receipt.execution_mode
+      : null;
+    if (!executionMode) throw new ApiError(400, "실행 모드는 PHONE_CLOSED_LOOP 또는 ROS2_SIMULATION이어야 합니다.");
+    const reasonCode = textValue(receipt.reason_code, "종료 이유 코드", 3, 80).toUpperCase();
+    if (!/^[A-Z0-9_]+$/.test(reasonCode)) throw new ApiError(400, "종료 이유 코드는 영문 대문자, 숫자, 밑줄만 사용할 수 있습니다.");
+    const terminalStep = textValue(receipt.terminal_step, "종료 단계", 2, 120);
+    const metrics = asRecord(receipt.metrics);
+    const metricEntries = Object.entries(metrics);
+    if (!metricEntries.length || metricEntries.length > 32 || metricEntries.some(([key, value]) => (
+      key.length > 80 || !(value === null || ["string", "number", "boolean"].includes(typeof value))
+    ))) throw new ApiError(400, "측정 요약은 1~32개의 단순 값이어야 합니다.");
+    const artifact = asRecord(receipt.artifact);
+    const artifactHash = typeof artifact.hash_sha256 === "string" ? artifact.hash_sha256.toLowerCase() : "";
+    const byteLength = artifact.byte_length;
+    if (
+      artifact.media_type !== "application/json"
+      || artifactHash !== evidenceHash
+      || !Number.isInteger(byteLength)
+      || Number(byteLength) < 2
+      || Number(byteLength) > 5_000_000
+      || artifact.storage !== "USER_DEVICE_ONLY"
+    ) throw new ApiError(400, "증거 artifact의 형식, 길이, 저장 위치 또는 해시가 영수증과 일치하지 않습니다.");
+    const scenario = asRecord(request.experiment).scenario;
+    if (scenario === "person_following" && executionMode !== "ROS2_SIMULATION") {
+      throw new ApiError(409, "사람 추종 작업은 스마트폰에서 ROS2 시뮬레이션으로만 보고할 수 있습니다.");
+    }
+    if (receipt.physical_execution_verified !== false) throw new ApiError(400, "스마트폰 영수증은 물리 실행을 검증했다고 표시할 수 없습니다.");
+    receiptBase = {
+      schema: "campfire.device-receipt.v2",
+      job_id: jobId,
+      idempotency_key: idempotencyKey,
+      status,
+      device_id: deviceId,
+      observed_at: observedAt,
+      evidence_hash_sha256: evidenceHash,
+      request_hash_sha256: submittedRequestHash,
+      design_hash_sha256: submittedDesignHash,
+      attempt_id: attemptId,
+      execution_mode: executionMode,
+      reason_code: reasonCode,
+      terminal_step: terminalStep,
+      metrics,
+      artifact: {
+        media_type: "application/json",
+        byte_length: byteLength,
+        hash_sha256: artifactHash,
+        storage: "USER_DEVICE_ONLY",
+      },
+      verification_scope: "SERVER_JOB_KEYS_AND_HASH_FORMAT_PLUS_CLIENT_HASHED_LOCAL_ARTIFACT_CLAIM",
+      physical_execution_verified: false,
+    };
+  } else {
+    receiptBase = {
+      schema: "campfire.device-receipt.v1",
+      job_id: jobId,
+      idempotency_key: idempotencyKey,
+      status,
+      device_id: deviceId,
+      observed_at: observedAt,
+      evidence_hash_sha256: evidenceHash,
+      request_hash_sha256: submittedRequestHash,
+      design_hash_sha256: submittedDesignHash,
+      verification_scope: "SCHEMA_JOB_KEY_REQUEST_HASH_DESIGN_HASH_AND_EVIDENCE_HASH_ONLY",
+      physical_execution_verified: false,
+    };
+  }
   const receiptHash = await sha256(receiptBase);
   const receiptPayload = { ...receiptBase, receipt_hash_sha256: receiptHash };
+  const verificationScope = String(receiptBase.verification_scope);
   if (["REPORTED_SUCCEEDED", "REPORTED_FAILED", "REPORTED_ABORTED"].includes(job.status)) {
     const storedReceipt = parseJson<{ receipt_hash_sha256?: string }>(job.receipt_json);
     if (storedReceipt?.receipt_hash_sha256 === receiptHash) return row.session_id;
@@ -867,7 +935,7 @@ async function applyDeviceReceipt(db: D1Database, userId: string, payload: JsonR
   const receiptId = id("receipt");
   const reportedStatus = `REPORTED_${status}`;
   const receiptState = `USER_REPORTED_${status}`;
-  const nextState = status === "SUCCEEDED" ? "RECEIPT_RECORDED" : "FAILURE_REPORTED";
+  const nextState = status === "SUCCEEDED" ? "RECEIPT_RECORDED" : status === "ABORTED" ? "EXECUTION_ABORTED" : "FAILURE_REPORTED";
   try {
     await db.batch([
       db.prepare("UPDATE device_jobs SET status = ?, receipt_json = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'RECEIPT_PROCESSING'")
@@ -878,7 +946,7 @@ async function applyDeviceReceipt(db: D1Database, userId: string, payload: JsonR
           request,
           receipt: receiptPayload,
           verification: {
-            scope: receiptPayload.verification_scope,
+            scope: verificationScope,
             physical_execution_verified: false,
           },
         }), timestamp, job.production_run_object_id, userId),
@@ -903,7 +971,7 @@ async function applyDeviceReceipt(db: D1Database, userId: string, payload: JsonR
           device_id: deviceId,
           observed_at: observedAt,
           external_status: status,
-          verification_scope: receiptPayload.verification_scope,
+          verification_scope: verificationScope,
           physical_execution_verified: false,
         }, timestamp,
       }),

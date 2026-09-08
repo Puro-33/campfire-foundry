@@ -95,3 +95,47 @@ README의 행은 사실 객체로 바로 승격하지 않고 `CatalogMention`으
 | 97만 실제 로봇 시연 | [OpenVLA](https://proceedings.mlr.press/v270/kim25c.html) | Moo Jin Kim 외, PMLR 2025 | 출판 논문 페이지 |
 | 3만 미만 에피소드, 1천만 프레임, 품질·coverage 선별 | [SmolVLA](https://huggingface.co/blog/smolvla) | Hugging Face 연구팀, 2025-06-03 | 공식 기술 글 |
 | 사용자 지정 장치 저장소 | [OpenCat Quadruped Robot](https://github.com/PetoiCamp/OpenCat-Quadruped-Robot) | PetoiCamp, 2026-09-05 접근 | GitHub API 메타데이터 확인 |
+
+---
+
+# 스마트폰 센서와 ROS 2 시뮬레이션 런타임 조사
+
+- 조사일: 2026-09-06 (America/Los_Angeles)
+- 질문: 별도 장비 없이 스마트폰만으로 Physical AI의 감지–해석–피드백 루프를 만들고 ROS 2에 연결할 수 있는가?
+- 결론: 가능하다. 스마트폰은 카메라·IMU·GPS·마이크 센서 노드와 화면·소리·진동 피드백 장치가 될 수 있다. 다만 스마트폰 자체에는 이동·조작 액추에이터가 없으므로 사람 추종의 물리 이동은 ROS 2 시뮬레이터로만 표현해야 한다.
+
+## 구현 선택
+
+브라우저는 사용자 동작으로 센서 권한을 받고 관찰을 로컬에서 처리한다. 원시 카메라 프레임과 원시 음성은 Campfire 서버에 올리지 않는다. 모션·위치·비전 요약·검토한 전사만 사용자가 지정한 rosbridge WebSocket으로 선택적으로 발행한다. HTTPS 사이트에서 평문 `ws://` 연결은 혼합 콘텐츠 제약을 받으므로 실제 휴대폰 연결에는 인증된 `wss://` reverse proxy가 필요하다.
+
+ROS 2 패키지는 Jazzy를 기준으로 했다. 2026년 최신 배포판은 Lyrical이지만 Jazzy는 Ubuntu 24.04 기반 장기 지원 배포판이고 2029년 5월까지 지원되어 현재 WSL2·패키지 생태계와의 호환성을 우선하기에 적절하다. 구현한 메시지는 표준 `sensor_msgs/msg/Imu`, `sensor_msgs/msg/NavSatFix`, `std_msgs/msg/String`, `geometry_msgs/msg/Twist`만 사용하므로 이후 배포판에도 이식 가능하다.
+
+rosbridge는 브라우저와 ROS 사이에 JSON/WebSocket 인터페이스를 제공한다. 브라우저는 `/campfire/phone/imu`, `/campfire/phone/navsat`, `/campfire/phone/vision`, `/campfire/phone/transcript`, `/campfire/phone/runtime`을 발행하고 `/campfire/phone/feedback`만 구독한다. 피드백은 길이가 제한된 진동·음성 화이트리스트만 허용한다.
+
+## 정확성·안전 경계
+
+- 프레임 차이 기반 비전은 움직임 중심을 찾을 뿐 사람을 식별하지 않는다.
+- 모션 임계값 기반 걸음 수는 웰니스용 추정이며 의료 진단이 아니다.
+- 브라우저 음성 인식은 구현에 따라 제3자 서버 처리가 발생할 수 있으므로 별도 동의가 필요하다.
+- production HTTPS 페이지는 사용자가 제공한 WSS bridge에만 연결하며 rosbridge 9090 포트를 인터넷에 직접 노출하지 않는다.
+- 스마트폰 런타임의 성공은 사용자 보고이고 물리 실행 증명이 아니다. evidence JSON의 실제 바이트 해시, 작업·설계 해시, 종료 이유와 시뮬레이션 모드를 영수증에 묶는다.
+- 카메라 관찰을 ROS로 보내는 실행은 시작 시 `ROS2_SIMULATION`으로 고정하며 데이터 전송 동의와 시뮬레이션 전용 확인을 모두 요구한다. 실행 중 연결이 끊기거나 브라우저가 백그라운드로 가면 센서와 ROS 임대를 중단한다.
+- 과거 v2 외부 어댑터 영수증은 서버에서 읽을 수 있지만 브라우저 센서 실행 권한은 새 v3 작업에만 부여한다.
+- 원래의 `person_following`은 `ROS2_SIMULATION` 이외의 모드로 성공 처리하지 않는다.
+
+## 주장-출처 원장
+
+| 주장 | 1차 출처 | 적용 |
+|---|---|---|
+| ROS 2 배포판 출시·지원 일정 | [ROS 2 Releases](https://docs.ros.org/en/rolling/Releases.html) | 최신성 및 Jazzy 지원 기간 확인 |
+| Jazzy Ubuntu 패키지 설치 기준 | [ROS 2 Jazzy Ubuntu deb packages](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html) | Ubuntu 24.04/WSL2 개발 기준 |
+| rosbridge가 ROS에 JSON API와 WebSocket server 제공 | [RobotWebTools rosbridge_suite](https://github.com/RobotWebTools/rosbridge_suite) | 브라우저–ROS 전송 계층 |
+| rosbridge v2의 advertise/publish/subscribe 연산 | [ROSBRIDGE protocol specification](https://github.com/RobotWebTools/rosbridge_suite/blob/ros2/ROSBRIDGE_PROTOCOL.md) | 웹 런타임 메시지 봉투 |
+| ROS 표준 센서 메시지 정의 | [sensor_msgs package](https://docs.ros.org/en/rolling/p/sensor_msgs/) | IMU·NavSatFix 계약 |
+| 브라우저 모션 센서 이벤트 | [MDN DeviceMotionEvent](https://developer.mozilla.org/en-US/docs/Web/API/DeviceMotionEvent) | 권한·가용성 경계 |
+| 브라우저 위치 API | [MDN Geolocation API](https://developer.mozilla.org/en-US/docs/Web/API/Geolocation_API) | GPS 관찰 수명주기 |
+| 브라우저 WebSocket API | [MDN WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API) | rosbridge 연결 |
+| 진동 API는 제한적 지원 | [MDN Vibration API](https://developer.mozilla.org/en-US/docs/Web/API/Vibration_API) | 선택적 피드백·fallback |
+| 음성 인식은 서버 기반일 수 있음 | [MDN Web Speech API usage](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API/Using_the_Web_Speech_API) | 제3자 처리 동의 표시 |
+
+핵심 메시지·전송·센서 API와 지원 일정을 1차 문서에서 확인했고, 특정 비전 모델을 추가하지 않아도 의존성 없는 움직임 관찰 MVP를 만들 수 있어 조사를 중단했다. 실기기 최종 확인은 Android Chrome과 iOS Safari에서 각각 권한 허용·철회·백그라운드 전환을 시험해야 한다.
